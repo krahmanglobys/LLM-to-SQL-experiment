@@ -1,0 +1,11 @@
+pandas
+numpy
+faiss-cpu
+azure-ai-inference
+azure-core
+azure-identity
+requests
+python-dotenv
+jupyter
+matplotlib
+plotly

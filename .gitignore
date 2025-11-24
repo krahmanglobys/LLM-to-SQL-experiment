@@ -1,0 +1,11 @@
+attwln_dbo_schem.txt
+database_schema.csv
+schema_tables_metadata.json
+schema_tables.faiss
+.env
+.env.local
+.env.development
+.env.production
+
+GCC_PSUP_Tickets.xlsx
+gcc_test_data.txt
