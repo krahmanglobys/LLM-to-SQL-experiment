@@ -127,7 +127,18 @@ def validate_sql_against_schema(sql_query: str, schema_text: str) -> dict:
 def fix_sql_with_feedback(original_query: str, validation_errors: list, schema_text: str, user_question: str) -> str:
     """
     Attempt to fix SQL query based on validation errors.
+    Intelligently includes hierarchy context only when ID-related errors are detected.
     """
+    # Check if errors are related to ID confusion or hierarchy issues
+    id_related_keywords = ['id', 'account', 'organization', 'client', 'user', 'sub_account', 'statement', 'hierarchy']
+    needs_hierarchy_context = any(
+        any(keyword in error.lower() for keyword in id_related_keywords) 
+        for error in validation_errors
+    )
+    
+    # Also check if the user question mentions IDs or relationships
+    question_needs_context = any(keyword in user_question.lower() for keyword in id_related_keywords)
+    
     feedback_prompt = f"""
 The following SQL query has validation errors and needs to be corrected:
 
@@ -144,7 +155,23 @@ AVAILABLE SCHEMA:
 
 USER QUESTION:
 {user_question}
+"""
+    
+    # Add hierarchy context only when ID-related errors are detected
+    if needs_hierarchy_context or question_needs_context:
+        try:
+            with open("DATA_HIERARCHY_CONTEXT.md", "r", encoding="utf-8") as f:
+                hierarchy_context = f.read()
+            feedback_prompt += f"""
 
+{hierarchy_context}
+
+IMPORTANT: The validation errors suggest confusion about ID relationships. Use the hierarchy context above to understand the correct relationships between different ID types.
+"""
+        except FileNotFoundError:
+            print("Warning: DATA_HIERARCHY_CONTEXT.md not found. Proceeding without hierarchy context.")
+    
+    feedback_prompt += """
 Please provide a corrected T-SQL query that:
 1. Fixes all the validation errors listed above
 2. Uses only tables and columns that exist in the provided schema
@@ -158,10 +185,16 @@ Return ONLY the corrected SQL query without any explanation:
 
 
 
-def build_sql_prompt(user_question: str, relevant_schema: str) -> str:
+def build_sql_prompt(user_question: str, relevant_schema: str, include_hierarchy_context: bool = False) -> str:
     """
     Build the user-facing prompt that will be sent to the chat model.
+    
+    Args:
+        user_question: The user's natural language question
+        relevant_schema: The database schema context
+        include_hierarchy_context: Whether to include the full hierarchy context (used for error correction)
     """
+    # Base prompt without hierarchy context (for initial attempts)
     prompt = f"""
 You are an expert T-SQL assistant. You write correct and efficient queries for Microsoft SQL Server.
 
@@ -170,88 +203,162 @@ User question:
 
 # Role Definition
 
-You are an expert T-SQL database developer with deep expertise in query optimization, schema analysis, and translating natural language questions into precise, efficient SQL queries. Your role is to analyze provided table schemas, understand user requirements, and construct accurate T-SQL queries that directly answer the user's question.
+You are an expert T-SQL database developer with deep expertise in query optimization, schema analysis, and translating natural language questions into precise, efficient SQL queries. Your queries will be automatically validated against the provided schema, so accuracy is critical.
+
+# Data Structure Awareness
+
+This system follows a strict hierarchical data structure with specific ID relationships:
+- **Client ID** → **Product/Bundle ID** → **Organization ID** → **Account ID** → **User ID / Sub_Account ID**
+- Be especially careful when distinguishing between **Account ID** (customer entity) and **Sub_Account ID** (specific services/usage data)
+- When queries involve multiple ID types, consider their hierarchical relationships
+- If your initial query fails validation due to ID relationship issues, additional hierarchy context will be provided
+
+# Important ID Guidelines
+
+- For usage/data queries: Focus on **Sub_Account ID** level
+- For customer/billing queries: Focus on **Account ID** level  
+- For organizational structure: Focus on **Organization ID** level
+- Always verify ID relationships match the hierarchical structure"""
+    
+    # Only add hierarchy context when needed (error correction attempts)
+    if include_hierarchy_context:
+        try:
+            with open("DATA_HIERARCHY_CONTEXT.md", "r", encoding="utf-8") as f:
+                hierarchy_context = f.read()
+            prompt = f"""
+You are an expert T-SQL assistant. You write correct and efficient queries for Microsoft SQL Server.
+
+User question:
+{user_question}
+
+{hierarchy_context}
+
+# Role Definition
+
+You are an expert T-SQL database developer with deep expertise in query optimization, schema analysis, and translating natural language questions into precise, efficient SQL queries. Your queries will be automatically validated against the provided schema, so accuracy is critical."""
+        except FileNotFoundError:
+            print("Warning: DATA_HIERARCHY_CONTEXT.md not found. Proceeding without hierarchy context.")
+    
+    prompt += f"""
+
+# CRITICAL: Schema Validation Process
+
+⚠️  **IMPORTANT**: Your generated SQL will be automatically validated against the provided schema. Queries that reference non-existent tables or columns will be rejected and you'll be asked to fix them. To avoid validation errors:
+
+1. **Use ONLY the tables explicitly listed in the schema below**
+2. **Use ONLY the columns that exist in those tables**
+3. **Match table names exactly as they appear in the schema**
+4. **Pay attention to schema prefixes (e.g., dbo.table_name)**
 
 # Contextual Information
 
 You will be provided with:
-- A list of the most relevant database tables with their schemas (table names, column names, data types, and relationships)
-- A natural language question from the user that requires a SQL query to answer
+- A curated list of the most relevant database tables with their complete schemas
+- Table names, column names, data types, constraints, and relationships
+- A natural language question that requires a SQL query to answer
 
-The tables provided have been pre-selected as the most relevant to the user's question, but you must determine the optimal way to query them. You are working within a T-SQL environment (SQL Server/Azure SQL Database).
+The tables provided have been pre-selected as the most relevant to the user's question through semantic search. You are working within a T-SQL environment (SQL Server/Azure SQL Database).
+
+# Available Schema
+
+{relevant_schema}
 
 # Task Description and Goals
 
 Your primary goal is to generate a precise, executable T-SQL query that accurately answers the user's question using the provided table schemas. The query should be:
 
-1. **Accurate**: Directly answers the specific question asked
-2. **Efficient**: Uses appropriate joins, filters, and indexing strategies
-3. **Specific**: Targets the exact data needed without over-fetching
-4. **Readable**: Well-formatted with clear aliasing and logical structure
+1. **Schema-Compliant**: Uses only tables and columns that exist in the provided schema
+2. **Accurate**: Directly answers the specific question asked
+3. **Efficient**: Uses appropriate joins, filters, and indexing strategies
+4. **Executable**: Valid T-SQL syntax that will run without errors
+5. **Readable**: Well-formatted with clear aliasing and logical structure
 
 # Instructional Guidance and Constraints
 
 Follow this systematic approach:
 
-1. **Analyze the Question**: Break down what the user is asking for—identify required columns, filtering conditions, aggregations, and relationships between tables.
+1. **Schema Analysis First**: Before writing any SQL, carefully review the provided schema to identify:
+   - Exact table names and how they're referenced (with/without schema prefix)
+   - Available columns in each table and their data types
+   - Primary keys ([PK]) and foreign keys ([FK]) for joins
+   - Relationships between tables based on foreign key references
 
-2. **Review Provided Tables**: Examine the table schemas to understand:
-   - Which columns contain the needed data
-   - How tables relate to each other (foreign keys, common columns)
-   - What data types you're working with
-   {relevant_schema}
+2. **Question Analysis**: Break down what the user is asking for:
+   - Required columns for the output
+   - Filtering conditions needed
+   - Aggregations or calculations required
+   - Relationships between tables needed
 
-3. **Iterative Query Construction**: Attempt to build the most specific query first, following this progression:
-   - **Attempt 1**: Construct a highly specific query targeting exact columns and relationships you've identified
-   - **Attempt 2**: If the first approach has limitations or uncertainties, try an alternative approach with different joins or filtering logic
-   - **Attempt 3**: If specific approaches are problematic, broaden the query slightly while maintaining precision
-   - **Final Resort**: Only if the above attempts are insufficient, construct a more general query that captures the needed data with additional filtering that can be applied post-query
+3. **Query Construction**:
+   - Start with the main table that contains the core data
+   - Add JOINs only for tables that are necessary and exist in the schema
+   - Use explicit JOIN syntax (INNER JOIN, LEFT JOIN, etc.)
+   - Reference columns exactly as they appear in the schema
+   - Add WHERE clauses for filtering
+   - Include appropriate ORDER BY, GROUP BY, or HAVING clauses
 
-4. **Query Requirements**:
-   - Use explicit JOIN syntax (INNER JOIN, LEFT JOIN, etc.) rather than implicit joins
-   - Include WHERE clauses for any filtering conditions
-   - Use appropriate aggregation functions (COUNT, SUM, AVG, etc.) when needed
-   - Add ORDER BY clauses when the question implies a specific ordering
-   - Include TOP or OFFSET-FETCH for limited result sets when appropriate
+4. **Pre-Validation Checklist** (CRITICAL - Follow Before Writing SQL):
+   ✅ Verify ALL table names exist exactly as shown in the schema above
+   ✅ Verify ALL column names exist in their respective tables 
+   ✅ Ensure JOIN conditions use valid foreign key relationships from the schema
+   ✅ Check that data types are compatible for comparisons and operations
+   ✅ Confirm SQL syntax follows valid T-SQL standards
+   ✅ Double-check that no assumptions are made about tables/columns not in the schema
+
+5. **Schema Validation Requirements**:
+   - **MANDATORY**: Every table name in your query MUST appear in the schema above
+   - **MANDATORY**: Every column name in your query MUST exist in the specified table
+   - **MANDATORY**: Use exact naming conventions including schema prefixes (e.g., dbo.table_name)
+   - If you're unsure about a table or column, do NOT include it - only use what's explicitly provided
+
+6. **Query Requirements**:
+   - Use explicit JOIN syntax rather than implicit joins
+   - Include appropriate WHERE clauses for filtering
+   - Use proper aggregation functions when needed
+   - Add ORDER BY when the question implies specific ordering
    - Use table aliases for readability
-   - Comment complex logic within the query
+   - Handle potential NULL values appropriately
 
-5. **Validation Checks**:
-   - Ensure all referenced columns exist in the provided tables
-   - Verify join conditions are logical and complete
-   - Confirm the output matches what the question asks for
-   - Check for potential NULL handling issues
-
-# Expected Output Format and Examples
+# Expected Output Format
 
 Your response should follow this structure:
 
 ```
 ## Query Analysis
-[Brief 2-3 sentence explanation of what the user is asking for and your approach]
+[Brief explanation of what you're trying to achieve and which tables/columns you'll use]
+
+## Schema Validation Check
+[Confirm that all tables and columns in your query exist in the provided schema - list the specific tables and key columns you're using]
 
 ## T-SQL Query
 ```sql
-[Your complete, executable T-SQL query]
+[Your complete, executable T-SQL query using only schema-provided tables/columns]
 ```
 
-## Query Explanation
-[Explain the key components: joins used, filtering logic, aggregations, and why this approach answers the question]
+## Business Logic Explanation
+[Explain in plain English what this query is doing, how the data flows through the system, and why these specific tables are connected. Help someone unfamiliar with the database understand the business relationships and data structure.]
+
+## Technical Query Explanation
+[Explain the joins, filtering logic, and technical implementation details of why this approach answers the question]
 
 ## Assumptions
 [List any assumptions made about the data or relationships]
 ```
 
 ## Few-Shot Examples
-**Example :**
+**Example:**
 ```
 User Question: "Get a list of org id, account id with their billed amount for which they have autopay enabled."
 Tables Provided:
-- t_acct
+- t_acct_payment_info
 - t_billed
 
 Query Analysis:
-Get a list of org id, account id with their billed amount for which they have autopay enabled.
+Need to find billing records for accounts that have autopay enabled by connecting payment information to billing data.
+
+Schema Validation Check:
+- t_acct_payment_info: Contains autopay_enabled column and acct_id for joining
+- t_billed: Contains billing amounts and acct_id for joining
 
 T-SQL Query:
 ```sql
@@ -260,12 +367,21 @@ WITH autopay_on AS (
     FROM dbo.t_acct_payment_info
     WHERE autopay_enabled IS NOT NULL
 )
-SELECT a.*
-FROM dbo.t_billed AS a
+SELECT b.org_id, b.acct_id, b.billed_amount
+FROM dbo.t_billed AS b
 JOIN autopay_on AS ap
-    ON a.acct_id = ap.acct_id;
+    ON b.acct_id = ap.acct_id;
 ```
 
+Business Logic Explanation:
+This query is looking for customers who have automatic payment set up and retrieving their billing information. In our system, customer payment preferences (like autopay) are stored separately from billing records. We first identify all accounts that have autopay enabled, then connect that information to the billing table to get the actual billing amounts. This gives us a list of customers who pay automatically along with how much they're being billed.
+
+Technical Query Explanation:
+Uses a CTE to first filter accounts with autopay enabled, then joins this filtered set with the billing table on account_id to get the corresponding billing amounts. The INNER JOIN ensures we only get accounts that exist in both tables.
+
+Assumptions:
+- autopay_enabled IS NOT NULL indicates autopay is active
+- acct_id is the common key between payment info and billing tables
 ```
 
 # Any Additional Notes on Scope or Limitations
@@ -330,8 +446,11 @@ def generate_sql_from_question(question: str, max_attempts: int = 3) -> str:
     for attempt in range(max_attempts):
         print(f"\n🔄 Attempt {attempt + 1}/{max_attempts}")
         
-        # Build prompt for Matcha
-        prompt = build_sql_prompt(question, pruned_schema)
+        # Build prompt for Matcha (include hierarchy context only for retry attempts or ID-related questions)
+        id_keywords = ['id', 'account', 'organization', 'client', 'user', 'sub_account', 'statement', 'hierarchy']
+        needs_context = attempt > 0 or any(keyword in question.lower() for keyword in id_keywords)
+        
+        prompt = build_sql_prompt(question, pruned_schema, include_hierarchy_context=needs_context)
         
         # Generate SQL
         print("🤖 Generating SQL query...")
@@ -401,29 +520,39 @@ def extract_sql_from_response(response: str) -> str:
 
 
 if __name__ == "__main__":
-    user_q = """I need a list of users in orgs that have the permission id 860 this does not work SELECT 
-    op.organization_id
-FROM 
-    attwln_config_prod_db.dbo.t_organization_permission AS op
-WHERE 
-    op.permission_id = 860
-    AND op.negative = 0;
-
-"""
+    user_q = """I need to modify this so that it shows the org id, billing amount
+    SELECT 
+    COUNT(*) AS num_accounts_meeting_criteria
+FROM (
+    SELECT 
+        p.acct_id
+    FROM 
+        dbo.t_payment AS p
+    INNER JOIN 
+        dbo.t_acct_payment_info AS api ON p.acct_id = api.acct_id
+    WHERE 
+        api.autopay_enabled IS NOT NULL
+        AND p.payment_dt >= DATEADD(YEAR, -2, GETDATE())
+    GROUP BY 
+        p.acct_id
+    HAVING 
+        SUM(p.pay_amt) > 10000
+) AS qualified_accounts;
+    """
     sql_query = generate_sql_from_question(user_q)
     print("Generated SQL Query:\n")
     print(sql_query)
 
 """
 To Do:
-billingid, orgid, acctid these are getting interchanged and are assumed to be the same
+billingid, orgid, acctid these are getting interchanged and are assumed to be the same(Done-Testing)
 need to update the prompt so that the assumptions are less and it checks the schema more
     need to avoid statements such as found billing in some random table so gonna go with that
     need to make sure that every table and column name is visible(DONE)
 
 
 
-wanna add some sort of feed back mechanics
+wanna add some sort of feed back mechanics(Done-Testing)
 read up on chess paper again and see if anything is missing and understand it
 need to do a lot of testing 
 """
