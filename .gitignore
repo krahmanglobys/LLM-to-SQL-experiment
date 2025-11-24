@@ -9,3 +9,4 @@ schema_tables.faiss
 
 GCC_PSUP_Tickets.xlsx
 gcc_test_data.txt
+data/
