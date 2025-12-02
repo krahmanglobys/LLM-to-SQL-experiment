@@ -41,7 +41,7 @@ def chat_once(prompt: str) -> str:
         "input": prompt,   # simple, single-turn
     }
 
-    resp = requests.post(url, headers=headers, data=json.dumps(payload), timeout=60)
+    resp = requests.post(url, headers=headers, data=json.dumps(payload), timeout=200)
     resp.raise_for_status()
     data = resp.json()
 
@@ -243,7 +243,7 @@ You are an expert T-SQL database developer with deep expertise in query optimiza
 
 # CRITICAL: Schema Validation Process
 
-⚠️  **IMPORTANT**: Your generated SQL will be automatically validated against the provided schema. Queries that reference non-existent tables or columns will be rejected and you'll be asked to fix them. To avoid validation errors:
+ **IMPORTANT**: Your generated SQL will be automatically validated against the provided schema. Queries that reference non-existent tables or columns will be rejected and you'll be asked to fix them. To avoid validation errors:
 
 1. **Use ONLY the tables explicitly listed in the schema below**
 2. **Use ONLY the columns that exist in those tables**
@@ -338,9 +338,6 @@ Your response should follow this structure:
 ## Business Logic Explanation
 [Explain in plain English what this query is doing, how the data flows through the system, and why these specific tables are connected. Help someone unfamiliar with the database understand the business relationships and data structure.]
 
-## Technical Query Explanation
-[Explain the joins, filtering logic, and technical implementation details of why this approach answers the question]
-
 ## Assumptions
 [List any assumptions made about the data or relationships]
 ```
@@ -376,8 +373,6 @@ JOIN autopay_on AS ap
 Business Logic Explanation:
 This query is looking for customers who have automatic payment set up and retrieving their billing information. In our system, customer payment preferences (like autopay) are stored separately from billing records. We first identify all accounts that have autopay enabled, then connect that information to the billing table to get the actual billing amounts. This gives us a list of customers who pay automatically along with how much they're being billed.
 
-Technical Query Explanation:
-Uses a CTE to first filter accounts with autopay enabled, then joins this filtered set with the billing table on account_id to get the corresponding billing amounts. The INNER JOIN ensures we only get accounts that exist in both tables.
 
 Assumptions:
 - autopay_enabled IS NOT NULL indicates autopay is active
@@ -406,7 +401,7 @@ def chat_once(prompt: str) -> str:
     }
 
     print("🤖 Sending request to Matcha API... Please wait for response.")
-    resp = requests.post(url, headers=headers, data=json.dumps(payload), timeout=200)
+    resp = requests.post(url, headers=headers, data=json.dumps(payload), timeout=500)
     resp.raise_for_status()
     data = resp.json()
 
@@ -418,7 +413,7 @@ def chat_once(prompt: str) -> str:
     return first_output
 
 
-def generate_sql_from_question(question: str, max_attempts: int = 3) -> str:
+def generate_sql_from_question(question: str, max_attempts: int = 3) -> tuple[str, str]:
     """
     Generate SQL from a natural language question with validation feedback loop.
     
@@ -427,16 +422,16 @@ def generate_sql_from_question(question: str, max_attempts: int = 3) -> str:
         max_attempts: Maximum number of attempts to generate valid SQL
     
     Returns:
-        Validated SQL query string
+        Tuple of (full_response_with_explanations, validated_sql_query)
     """
     # 1) Retrieve small schema slice with better parameters
     pruned_schema = query_schema(
         question, 
         method="chess",
-        k_cols=30,           # Reduce to get more focused results
-        max_tables=3,        # Fewer tables for clearer schema
-        max_cols_per_table=5, # Focus on most relevant columns
-        max_char_per_table=3000  # Allow more characters per table
+        k_cols=5,           # Reduce to get more focused results
+        max_tables=100,        # Fewer tables for clearer schema
+        max_cols_per_table=10, # Focus on most relevant columns
+        max_char_per_table=1000  # Allow more characters per table
     )
     print("=== Schema Retrieved ===")
     print(pruned_schema)
@@ -469,7 +464,7 @@ def generate_sql_from_question(question: str, max_attempts: int = 3) -> str:
             print("✅ SQL validation passed!")
             if validation["warnings"]:
                 print(f"⚠️  Warnings: {'; '.join(validation['warnings'])}")
-            return sql_query
+            return sql, sql_query  # Return both full response and SQL query
         else:
             print(f"❌ SQL validation failed: {'; '.join(validation['errors'])}")
             
@@ -480,9 +475,9 @@ def generate_sql_from_question(question: str, max_attempts: int = 3) -> str:
             else:
                 print("⚠️  Maximum attempts reached. Returning last generated SQL with validation errors.")
                 print(f"Final validation errors: {'; '.join(validation['errors'])}")
-                return sql_query
+                return sql, sql_query  # Return both even with errors
     
-    return sql_query
+    return sql, sql_query  # Fallback return
 
 
 def extract_sql_from_response(response: str) -> str:
@@ -520,30 +515,32 @@ def extract_sql_from_response(response: str) -> str:
 
 
 if __name__ == "__main__":
-    user_q = """I need to modify this so that it shows the org id, billing amount
-    SELECT 
-    COUNT(*) AS num_accounts_meeting_criteria
-FROM (
-    SELECT 
-        p.acct_id
-    FROM 
-        dbo.t_payment AS p
-    INNER JOIN 
-        dbo.t_acct_payment_info AS api ON p.acct_id = api.acct_id
-    WHERE 
-        api.autopay_enabled IS NOT NULL
-        AND p.payment_dt >= DATEADD(YEAR, -2, GETDATE())
-    GROUP BY 
-        p.acct_id
-    HAVING 
-        SUM(p.pay_amt) > 10000
-) AS qualified_accounts;
-    """
-    sql_query = generate_sql_from_question(user_q)
-    print("Generated SQL Query:\n")
+    user_q = """ Please resolve the following error:  They are getting an error message: You don't have any accounts set up for Business center. The issue is that I provisioned it for them and the account numbers are still billing.	GCC-42748	Medium	"ISSUE_WITH: Billing Account
+
+COMPANY_NAME: FELLOWES
+CUSTOMER_ACCOUNT: 8310015049855
+CSR_CONTACT_NAME: 00000
+CUSTOMER_USERID: [phogan@fellowes.com|mailto:phogan@fellowes.com]
+BROWSER: Billing (new)
+PROBLEM_SUMMARY: They are getting an error message: You don't have any accounts set up for Business center. The issue is that I provisioned it for them and the account numbers are still billing,
+PROBLEM_DESCRIPTION: They are getting an error message: You don't have any accounts set up for Business center. The issue is that I provisioned it for them and the account numbers are still billing.
+ISSUE_REPLICATION_STEPS: You to the dashboard, go to the Billing (new) tab."	Nov/13/2025 4:51 AM	Nov/19/2025 6:00 PM	AT&T Wireline Support	Bill Analyst	Account Modification
+"""
+    full_response, sql_query = generate_sql_from_question(user_q)
+    
+    print("\n" + "="*80)
+    print("FULL RESPONSE WITH EXPLANATIONS:")
+    print("="*80)
+    print(full_response)
+    print("\n" + "="*80)
+    print("EXTRACTED SQL QUERY ONLY:")
+    print("="*80)
     print(sql_query)
 
+
+
 """
+
 To Do:
 billingid, orgid, acctid these are getting interchanged and are assumed to be the same(Done-Testing)
 need to update the prompt so that the assumptions are less and it checks the schema more
@@ -552,7 +549,6 @@ need to update the prompt so that the assumptions are less and it checks the sch
 
 
 
-wanna add some sort of feed back mechanics(Done-Testing)
 read up on chess paper again and see if anything is missing and understand it
 need to do a lot of testing 
 """
