@@ -5,6 +5,8 @@ import re
 import pandas as pd
 from preprocess import query_schema
 from dotenv import load_dotenv
+from datetime import datetime
+import uuid
 
 # Load environment variables
 load_dotenv()
@@ -514,6 +516,129 @@ def extract_sql_from_response(response: str) -> str:
     return response.strip()
 
 
+def save_feedback(session_id: str, user_question: str, full_response: str, sql_query: str, rating: str, user_comments: str = "") -> None:
+    """
+    Save user feedback to a JSON file.
+    
+    Args:
+        session_id: Unique identifier for this query session
+        user_question: Original user question
+        full_response: Full LLM response with explanations
+        sql_query: Extracted SQL query
+        rating: User rating ('good', 'bad', or 'neutral')
+        user_comments: Optional user comments about the response
+    """
+    feedback_data = {
+        "session_id": session_id,
+        "timestamp": datetime.now().isoformat(),
+        "user_question": user_question,
+        "full_response": full_response,
+        "sql_query": sql_query,
+        "rating": rating,
+        "user_comments": user_comments,
+        "metadata": {
+            "response_length": len(full_response),
+            "sql_length": len(sql_query),
+            "has_validation_errors": "validation failed" in full_response.lower()
+        }
+    }
+    
+    feedback_file = "feedback_data.jsonl"
+    
+    try:
+        # Append to JSONL file (one JSON object per line)
+        with open(feedback_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(feedback_data) + "\n")
+        print(f"✅ Feedback saved to {feedback_file}")
+    except Exception as e:
+        print(f"❌ Error saving feedback: {e}")
+
+
+def collect_user_feedback(session_id: str, user_question: str, full_response: str, sql_query: str) -> None:
+    """
+    Collect feedback from user about the generated response.
+    
+    Args:
+        session_id: Unique identifier for this query session
+        user_question: Original user question
+        full_response: Full LLM response with explanations
+        sql_query: Extracted SQL query
+    """
+    print("\n" + "="*60)
+    print("📝 FEEDBACK REQUEST")
+    print("="*60)
+    print("Please rate the quality of the generated response:")
+    print("  [G] Good - The response was helpful and accurate")
+    print("  [B] Bad - The response had issues or was incorrect")
+    print("  [N] Neutral - The response was okay but could be better")
+    print("-"*60)
+    
+    while True:
+        try:
+            feedback_input = input("Enter your rating [G/B/N]: ").strip().upper()
+            
+            if feedback_input in ['G', 'B', 'N']:
+                break
+            else:
+                print("❌ Invalid input. Please enter G, B, or N.")
+        except KeyboardInterrupt:
+            print("\n⚠️  Feedback is required. Please provide a rating.")
+            continue
+        except EOFError:
+            print("\n⚠️  Feedback is required. Please provide a rating.")
+            continue
+    
+    # Map input to full rating
+    rating_map = {'G': 'good', 'B': 'bad', 'N': 'neutral'}
+    rating = rating_map[feedback_input]
+    
+    # Collect optional comments
+    user_comments = ""
+    if rating in ['bad', 'neutral']:
+        print("\n💬 Optional: Please share what could be improved (press Enter to skip):")
+        try:
+            user_comments = input("Comments: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            user_comments = ""
+    
+    # Save feedback
+    save_feedback(session_id, user_question, full_response, sql_query, rating, user_comments)
+    
+    # Show thank you message
+    if rating == 'good':
+        print("🎉 Thank you for the positive feedback!")
+    elif rating == 'bad':
+        print("🔧 Thank you for the feedback. We'll work on improving the system.")
+    else:
+        print("👍 Thank you for your feedback!")
+
+
+def generate_sql_with_feedback(question: str, max_attempts: int = 3) -> tuple[str, str]:
+    """
+    Generate SQL from a natural language question with mandatory feedback collection.
+    
+    Args:
+        question: Natural language question
+        max_attempts: Maximum number of attempts to generate valid SQL
+    
+    Returns:
+        Tuple of (full_response_with_explanations, validated_sql_query)
+    """
+    # Generate unique session ID
+    session_id = str(uuid.uuid4())[:8]
+    
+    print(f"🔍 Session ID: {session_id}")
+    print(f"❓ Question: {question[:100]}{'...' if len(question) > 100 else ''}")
+    
+    # Generate SQL using existing function
+    full_response, sql_query = generate_sql_from_question(question, max_attempts)
+    
+    # Always collect feedback (mandatory)
+    collect_user_feedback(session_id, question, full_response, sql_query)
+    
+    return full_response, sql_query
+
+
 if __name__ == "__main__":
     user_q = """ Please resolve the following error:  They are getting an error message: You don't have any accounts set up for Business center. The issue is that I provisioned it for them and the account numbers are still billing.	GCC-42748	Medium	"ISSUE_WITH: Billing Account
 
@@ -526,7 +651,8 @@ PROBLEM_SUMMARY: They are getting an error message: You don't have any accounts 
 PROBLEM_DESCRIPTION: They are getting an error message: You don't have any accounts set up for Business center. The issue is that I provisioned it for them and the account numbers are still billing.
 ISSUE_REPLICATION_STEPS: You to the dashboard, go to the Billing (new) tab."	Nov/13/2025 4:51 AM	Nov/19/2025 6:00 PM	AT&T Wireline Support	Bill Analyst	Account Modification
 """
-    full_response, sql_query = generate_sql_from_question(user_q)
+    # Use the new feedback-enabled function
+    full_response, sql_query = generate_sql_with_feedback(user_q, max_attempts=3, collect_feedback=True)
     
     print("\n" + "="*80)
     print("FULL RESPONSE WITH EXPLANATIONS:")
