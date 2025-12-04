@@ -1,11 +1,26 @@
-pandas
-numpy
-faiss-cpu
-azure-ai-inference
-azure-core
-azure-identity
-requests
-python-dotenv
-jupyter
-matplotlib
-plotly
+# Core dependencies
+pandas>=2.0.0
+numpy>=1.24.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+
+# Azure AI and machine learning
+azure-ai-inference>=1.0.0b1
+azure-core>=1.29.0
+azure-identity>=1.14.0
+
+# Vector similarity search
+faiss-cpu>=1.7.4
+
+# Data visualization and analysis (optional)
+matplotlib>=3.7.0
+plotly>=5.15.0
+
+# Jupyter notebook support (optional)
+jupyter>=1.0.0
+ipykernel>=6.25.0
+
+# Development and testing (optional)
+pytest>=7.4.0
+black>=23.7.0
+flake8>=6.0.0
