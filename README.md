@@ -2,14 +2,7 @@
 
 A powerful tool that converts natural language questions into SQL queries using Large Language Models and intelligent schema matching.
 
-## 🌟 Features
 
-- **Natural Language to SQL**: Convert plain English questions into precise SQL queries
-- **Intelligent Schema Matching**: Uses FAISS vector similarity search to find relevant database tables
-- **Multi-attempt Validation**: Automatically retries and refines queries for accuracy
-- **Interactive CLI**: User-friendly command-line interface
-- **Azure OpenAI Integration**: Leverages advanced language models for query generation
-- **Schema-aware**: Validates queries against actual database schema
 
 ## 🚀 Quick Start
 
@@ -17,7 +10,7 @@ A powerful tool that converts natural language questions into SQL queries using 
 
 - Python 3.8 or higher
 - Azure OpenAI API access
-- Matcha API access (or your database API)
+- Matcha API access 
 
 ### Installation
 
@@ -53,10 +46,9 @@ A powerful tool that converts natural language questions into SQL queries using 
    METADATA_PATH=schema_tables_metadata.json
    ```
 
-4. **Initialize the schema index (first time only):**
-   ```bash
-   python3 preprocess.py
-   ```
+   **🔑 Credentials Access:**
+   All API keys and credentials can be found in **1Password AI vault** under the file:
+   **"LLM-SQL env credentials"**
 
 ### Usage
 
@@ -151,13 +143,7 @@ The schema file should contain table and column information in a format that can
 
 The system tries up to 3 times by default to generate a valid query. This is configured in the code but can be modified as needed.
 
-### Adding Custom Schema
 
-1. Update your schema file (`attwln_dbo_schem.txt`)
-2. Re-run the preprocessing script:
-   ```bash
-   python3 preprocess.py
-   ```
 
 ### Debugging
 
@@ -167,44 +153,3 @@ For detailed output and debugging information, check the console output which in
 - Full LLM responses
 - Extracted SQL queries
 
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
-
-## 📝 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-1. **FAISS Index Error**: If you see "could not open schema_tables.faiss for reading":
-   ```bash
-   python3 preprocess.py
-   ```
-
-2. **Environment Variables**: Ensure all required environment variables are set in your `.env` file
-
-3. **API Errors**: Check your Azure OpenAI and Matcha API credentials and endpoints
-
-4. **Schema Issues**: Ensure your schema file is properly formatted and accessible
-
-### Getting Help
-
-- Check the console output for detailed error messages
-- Ensure all dependencies are installed correctly
-- Verify your environment variables are set properly
-- Test your API connections independently
-
-## 📧 Support
-
-For questions, issues, or contributions, please open an issue in the GitHub repository.
-
----
-
-**Made with ❤️ by the LLM-to-SQL team**
