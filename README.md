@@ -34,6 +34,7 @@ A powerful tool that converts natural language questions into SQL queries using 
    AZURE_OPENAI_API_KEY=your_azure_openai_key
    AZURE_OPENAI_DEPLOYMENT_NAME=your_deployment_name
    AZURE_OPENAI_API_VERSION=2024-05-01-preview
+   AZURE_OPENAI_MODEL_NAME=model_name
    
    # Matcha API Configuration
    MATCHA_BASE_URL=https://matcha.harriscomputer.com/rest/api/v1
